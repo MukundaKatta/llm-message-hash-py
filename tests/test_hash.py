@@ -1,3 +1,7 @@
+import math
+
+import pytest
+
 from llm_message_hash import HashOpts, canonical_json, hash_request
 
 # ---------- canonical_json: structure ----------
@@ -151,17 +155,13 @@ def test_anthropic_preset_strips_cache_control_in_nested_content():
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
-                ],
+                "content": [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}],
             }
         ],
     }
     without_cc = {
         "model": "claude-sonnet-4-6",
-        "messages": [
-            {"role": "user", "content": [{"type": "text", "text": "hi"}]}
-        ],
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
     }
     opts = HashOpts.for_anthropic()
     assert hash_request(with_cc, opts) == hash_request(without_cc, opts)
@@ -262,3 +262,35 @@ def test_canonical_json_with_drop_keys_emits_stripped_structure():
     obj = {"a": 1, "drop_me": "noise", "b": 2}
     opts = HashOpts(drop_keys={"drop_me"})
     assert canonical_json(obj, opts) == '{"a":1,"b":2}'
+
+
+# ---------- canonical_json: non-finite floats ----------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [float("nan"), float("inf"), float("-inf"), math.nan, math.inf, -math.inf],
+)
+def test_canonical_json_rejects_non_finite_floats(bad):
+    # NaN/Infinity have no valid JSON representation. Emitting them
+    # silently would produce non-portable output (the Rust sibling crate
+    # rejects them) and poison cache keys, so we fail loudly instead.
+    with pytest.raises(ValueError):
+        canonical_json({"x": bad})
+
+
+def test_hash_request_rejects_non_finite_floats():
+    with pytest.raises(ValueError):
+        hash_request({"score": float("inf")})
+
+
+def test_canonical_json_rejects_non_finite_float_when_nested_in_list():
+    with pytest.raises(ValueError):
+        canonical_json({"xs": [1, 2, float("nan")]})
+
+
+def test_canonical_json_allows_normal_floats():
+    # finite floats are unaffected by the non-finite guard
+    assert canonical_json({"x": 2.5}) == '{"x":2.5}'
+    assert canonical_json({"x": 0.0}) == '{"x":0.0}'
+    assert canonical_json({"x": -1.5}) == '{"x":-1.5}'

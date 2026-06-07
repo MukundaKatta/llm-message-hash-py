@@ -92,12 +92,24 @@ def canonical_json(obj: Any, opts: HashOpts | None = None) -> str:
       - no whitespace
       - strings use `json.dumps` escaping (so non-ASCII stays escaped
         for byte-stability across Python builds)
+
+    Raises:
+        ValueError: if the structure contains a non-finite float
+            (`NaN`, `Infinity`, `-Infinity`). These have no valid JSON
+            representation, so emitting them would produce non-portable
+            output that the Rust sibling crate (and any spec-compliant
+            JSON parser) rejects. Failing loudly avoids silently
+            poisoning cache/idempotency keys.
     """
     canon = _canonicalize(obj, opts or HashOpts())
     # ensure_ascii=True keeps the byte sequence stable regardless of how
     # the source string was decoded; sort_keys + the recursive walk above
     # is belt-and-suspenders since we already sorted dicts.
-    return json.dumps(canon, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    # allow_nan=False rejects NaN/Infinity, which json.dumps would
+    # otherwise emit as bare tokens that are not valid JSON.
+    return json.dumps(
+        canon, ensure_ascii=True, separators=(",", ":"), sort_keys=True, allow_nan=False
+    )
 
 
 def hash_request(obj: Any, opts: HashOpts | None = None) -> str:

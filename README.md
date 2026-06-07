@@ -103,6 +103,10 @@ significant). Strings are case sensitive: `"hi"` and `"Hi"` hash
 differently. Numbers compare by their JSON representation: `42` and
 `42.0` are different strings and so hash differently.
 
+Non-finite floats (`NaN`, `Infinity`, `-Infinity`) have no valid JSON
+representation and raise `ValueError`, rather than silently emitting
+non-portable output that would poison cache keys.
+
 ## What it does NOT do
 
 - No tokenization. The hash is over structure, not token count.
