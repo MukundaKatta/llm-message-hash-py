@@ -121,20 +121,59 @@ def hash_request(obj: Any, opts: HashOpts | None = None) -> str:
 # ---- internals ----
 
 
+def _json_key(k: Any) -> str:
+    """Return the dict-key string exactly as `json.dumps` would emit it.
+
+    `json.dumps` coerces non-string keys before serializing: `bool` ->
+    `"true"`/`"false"`, `None` -> `"null"`, `int`/`float` -> their JSON
+    number form. We must replicate that coercion here (rather than a bare
+    `str(k)`) for two reasons:
+
+      - Correctness: a bare `str()` would emit `"True"`/`"None"`, which is
+        not valid JSON and would diverge from the Rust sibling crate.
+      - Necessity: once we need to compare keys (for `drop_keys` and
+        collision detection) we have to normalize them ourselves, because
+        `json.dumps(sort_keys=True)` raises on a dict that mixes string
+        and non-string keys.
+    """
+    if isinstance(k, str):
+        return k
+    if isinstance(k, bool):
+        return "true" if k else "false"
+    if k is None:
+        return "null"
+    if isinstance(k, int | float):
+        # reuse json's own number formatting; rejects NaN/Infinity keys too
+        return json.dumps(k, allow_nan=False)
+    raise TypeError(f"unsupported dict key type for canonical JSON: {type(k).__name__}")
+
+
 def _canonicalize(value: Any, opts: HashOpts) -> Any:
     """Recursively rebuild `value` with dropped keys removed.
 
     Dict-key sorting is delegated to `json.dumps(sort_keys=True)`. We
     only need to ensure (a) the structure has no dropped keys at any
-    depth and (b) child dicts/lists are rebuilt the same way.
+    depth, (b) child dicts/lists are rebuilt the same way, and (c) keys
+    are coerced to their JSON string form so a dict that mixes string and
+    non-string keys still serializes deterministically.
+
+    Raises:
+        ValueError: if two distinct keys coerce to the same JSON string
+            (e.g. the int `1` and the string `"1"`). Silently collapsing
+            them would drop data and make two different inputs hash
+            identically, defeating the purpose of the library.
     """
     if isinstance(value, dict):
         out: dict[str, Any] = {}
         for k, v in value.items():
-            # cast non-string keys to str the same way json.dumps would
-            key = k if isinstance(k, str) else str(k)
+            key = _json_key(k)
             if key in opts.drop_keys:
                 continue
+            if key in out:
+                raise ValueError(
+                    f"dict has colliding keys that map to the same JSON key {key!r}; "
+                    "cannot produce a stable canonical form"
+                )
             out[key] = _canonicalize(v, opts)
         return out
     if isinstance(value, list | tuple):

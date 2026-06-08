@@ -107,6 +107,13 @@ Non-finite floats (`NaN`, `Infinity`, `-Infinity`) have no valid JSON
 representation and raise `ValueError`, rather than silently emitting
 non-portable output that would poison cache keys.
 
+Non-string dict keys are coerced to their JSON form, matching
+`json.dumps` (and the Rust sibling): `int`/`float` become their number
+string, `True`/`False` become `"true"`/`"false"`, and `None` becomes
+`"null"`. If two distinct keys would collapse to the same JSON key
+(e.g. the int `1` and the string `"1"`), `ValueError` is raised instead
+of silently dropping data and making different inputs hash alike.
+
 ## What it does NOT do
 
 - No tokenization. The hash is over structure, not token count.

@@ -294,3 +294,48 @@ def test_canonical_json_allows_normal_floats():
     assert canonical_json({"x": 2.5}) == '{"x":2.5}'
     assert canonical_json({"x": 0.0}) == '{"x":0.0}'
     assert canonical_json({"x": -1.5}) == '{"x":-1.5}'
+
+
+# ---------- canonical_json: non-string dict keys ----------
+
+
+def test_canonical_json_coerces_int_keys_like_json():
+    # int keys are rendered as their JSON string form, matching json.dumps
+    assert canonical_json({2: "b", 1: "a"}) == '{"1":"a","2":"b"}'
+
+
+def test_canonical_json_coerces_bool_and_none_keys_to_json_literals():
+    # bare str() would emit "True"/"None"; json semantics require
+    # "true"/"false"/"null" so output stays valid, portable JSON.
+    assert canonical_json({True: "x"}) == '{"true":"x"}'
+    assert canonical_json({False: "y"}) == '{"false":"y"}'
+    assert canonical_json({None: "z"}) == '{"null":"z"}'
+
+
+def test_canonical_json_float_key_matches_json():
+    assert canonical_json({1.5: "x"}) == '{"1.5":"x"}'
+
+
+def test_canonical_json_mixed_str_and_nonstr_keys_is_stable():
+    # a dict mixing string and int keys must still serialize (json.dumps
+    # with sort_keys raises on such a dict on its own).
+    assert canonical_json({1: "a", "b": "c"}) == '{"1":"a","b":"c"}'
+
+
+def test_canonical_json_raises_on_colliding_keys():
+    # the int 1 and the string "1" both map to the JSON key "1".
+    # collapsing them silently would lose data and make distinct inputs
+    # hash alike, so we fail loudly instead.
+    with pytest.raises(ValueError):
+        canonical_json({1: "a", "1": "b"})
+
+
+def test_canonical_json_no_collision_when_one_key_is_dropped():
+    # if one of two colliding keys is dropped, there is no real collision.
+    opts = HashOpts(drop_keys={"1"})
+    assert canonical_json({1: "a", "1": "b", "keep": 0}, opts) == '{"keep":0}'
+
+
+def test_canonical_json_rejects_unsupported_key_type():
+    with pytest.raises(TypeError):
+        canonical_json({(1, 2): "tuple-key"})
